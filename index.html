@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>實拿金額計算器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <h1>實拿金額計算器</h1>
+      <p class="sub">每萬元 750 元利息，系統會自動換算為 7.5%。</p>
+
+      <div class="grid">
+        <label>放款日期
+          <input id="loanDate" type="date" />
+        </label>
+
+        <label>品項類型
+          <select id="itemType">
+            <option value="normal">一般</option>
+            <option value="vehicle">汽機車</option>
+            <option value="gold">黃金</option>
+          </select>
+        </label>
+
+        <label>放款金額
+          <input id="loanAmount" type="number" min="0" step="1" value="10000" />
+        </label>
+
+        <label id="vehicleSettingWrap" class="check hidden">
+          <input id="needVehicleSetting" type="checkbox" />
+          汽機車需要上設定，扣 2000
+        </label>
+
+        <label id="goldPriceWrap" class="hidden">今日一錢黃金價
+          <input id="goldPrice" type="number" min="0" step="1" value="0" />
+          <button id="fetchGoldBtn" type="button">自動抓金價</button>
+          <span id="goldStatus" class="hint"></span>
+        </label>
+      </div>
+
+      <section class="deductions">
+        <div class="row-title">
+          <h2>其他扣款</h2>
+          <button id="addDeductionBtn" type="button">新增</button>
+        </div>
+        <div id="deductionList"></div>
+      </section>
+
+      <button id="calculateBtn" class="primary" type="button">計算實拿金額</button>
+      <div id="errorBox" class="error hidden"></div>
+    </section>
+
+    <section id="resultPanel" class="panel result hidden"></section>
+  </main>
+
+  <script src="src/types.js"></script>
+  <script src="src/dateRules.js"></script>
+  <script src="src/calculate.js"></script>
+  <script src="src/goldPrice.js"></script>
+  <script src="src/stateMachine.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
