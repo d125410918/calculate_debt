@@ -2,5 +2,11 @@
   "name": "calculate-debt",
   "private": true,
   "version": "1.0.0",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": "20.x"
+  }
 }
