@@ -1,1 +1,0 @@
-export default function Page(){return(<main style={{padding:24}}><h1>自動計算出金額度</h1><p>Next.js 已成功啟動。</p></main>);}
