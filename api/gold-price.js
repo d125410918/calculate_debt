@@ -1,4 +1,5 @@
 const GOLD_SOURCE_URL = 'https://www.kjga.com.tw/ipc.php?ipage=0';
+const TARGET_FIELD = '黃金掛牌出價';
 
 function decodeHtmlEntity(text) {
   return String(text || '')
@@ -11,6 +12,13 @@ function decodeHtmlEntity(text) {
     .replace(/&#(\d+);/g, function (_, n) {
       return String.fromCharCode(Number(n));
     });
+}
+
+function normalizeText(text) {
+  return decodeHtmlEntity(String(text || ''))
+    .replace(/\s+/g, '')
+    .replace(/掛牌出金/g, '掛牌出價')
+    .trim();
 }
 
 function stripTags(html) {
@@ -64,44 +72,31 @@ function extractTableRows(html) {
   return rows;
 }
 
-function isGoldContext(text) {
-  return /(黃金|金價|飾金|條塊|金飾|金條|每錢|一錢|錢)/.test(String(text || ''));
-}
-
-function isWrongContext(text) {
-  return /(白金|鉑金|銀價|白銀|美元|盎司|公斤|台幣\/克|每克|買進|入金|回收|賣回)/i.test(String(text || ''));
-}
-
-function pickOutputGoldFromRow(cells) {
+function pickTargetFieldFromRow(cells) {
   const normalizedCells = cells.map(function (cell) { return String(cell || '').trim(); });
-  const rowText = normalizedCells.join(' ');
-  if (!/出金/.test(rowText)) return 0;
-  if (!isGoldContext(rowText) || isWrongContext(rowText)) return 0;
 
   for (let i = 0; i < normalizedCells.length; i += 1) {
     const cell = normalizedCells[i];
-    if (!/出金/.test(cell)) continue;
-
-    const numbersInSameCell = getMoneyNumbers(cell);
-    if (numbersInSameCell.length > 0) return numbersInSameCell[0];
+    if (normalizeText(cell) !== TARGET_FIELD) continue;
 
     for (let j = i + 1; j < normalizedCells.length; j += 1) {
-      const nextCell = normalizedCells[j];
-      if (isWrongContext(nextCell)) continue;
-      const numbers = getMoneyNumbers(nextCell);
+      const numbers = getMoneyNumbers(normalizedCells[j]);
       if (numbers.length > 0) return numbers[0];
     }
   }
 
-  const rowNumbers = getMoneyNumbers(rowText);
-  return rowNumbers.length > 0 ? rowNumbers[rowNumbers.length - 1] : 0;
+  const rowText = normalizedCells.join(' ');
+  if (normalizeText(rowText).indexOf(TARGET_FIELD) < 0) return 0;
+
+  const numbers = getMoneyNumbers(rowText);
+  return numbers.length > 0 ? numbers[numbers.length - 1] : 0;
 }
 
 function extractGoldPrice(html) {
   const rows = extractTableRows(html);
 
   for (let i = 0; i < rows.length; i += 1) {
-    const value = pickOutputGoldFromRow(rows[i]);
+    const value = pickTargetFieldFromRow(rows[i]);
     if (value > 0) return value;
   }
 
@@ -112,17 +107,13 @@ function extractGoldPrice(html) {
     .filter(Boolean);
 
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!/出金/.test(line)) continue;
-    if (!isGoldContext(line) || isWrongContext(line)) continue;
+    if (normalizeText(lines[i]).indexOf(TARGET_FIELD) < 0) continue;
 
-    const sameLineNumbers = getMoneyNumbers(line);
-    if (sameLineNumbers.length > 0) return sameLineNumbers[0];
+    const sameLineNumbers = getMoneyNumbers(lines[i]);
+    if (sameLineNumbers.length > 0) return sameLineNumbers[sameLineNumbers.length - 1];
 
     for (let j = i + 1; j < Math.min(i + 4, lines.length); j += 1) {
-      const nextLine = lines[j];
-      if (isWrongContext(nextLine)) continue;
-      const nextNumbers = getMoneyNumbers(nextLine);
+      const nextNumbers = getMoneyNumbers(lines[j]);
       if (nextNumbers.length > 0) return nextNumbers[0];
     }
   }
@@ -164,7 +155,7 @@ export default async function handler(req, res) {
     const twdPerMace = extractGoldPrice(html);
 
     if (!Number.isFinite(twdPerMace) || twdPerMace <= 0) {
-      throw new Error('KJGA 出金欄位未找到');
+      throw new Error('KJGA 黃金掛牌出價欄位未找到');
     }
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
@@ -172,7 +163,7 @@ export default async function handler(req, res) {
       success: true,
       price: Math.round(twdPerMace),
       unit: 'TWD_PER_MACE',
-      field: '出金',
+      field: TARGET_FIELD,
       source: 'kjga',
       sourceUrl: GOLD_SOURCE_URL,
       updatedAt: new Date().toISOString()
@@ -181,9 +172,9 @@ export default async function handler(req, res) {
     res.status(200).json({
       success: false,
       price: 0,
-      message: '自動抓取 KJGA 出金欄位失敗，請手動輸入今日一錢黃金出金價',
+      message: '自動抓取 KJGA 黃金掛牌出價失敗，請手動輸入今日一錢黃金掛牌出價',
       source: 'kjga',
-      field: '出金'
+      field: TARGET_FIELD
     });
   }
 }
