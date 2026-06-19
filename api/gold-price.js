@@ -13,6 +13,15 @@ function decodeHtmlEntity(text) {
     });
 }
 
+function stripTags(html) {
+  return decodeHtmlEntity(String(html || ''))
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[\t\r\n ]+/g, ' ')
+    .trim();
+}
+
 function htmlToText(html) {
   return decodeHtmlEntity(String(html || ''))
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -27,7 +36,7 @@ function htmlToText(html) {
     .trim();
 }
 
-function getNumbers(text) {
+function getMoneyNumbers(text) {
   const matches = String(text || '').match(/\d{1,3}(?:,\d{3})+|\d{4,6}/g) || [];
   return matches
     .map(function (value) { return Number(value.replace(/,/g, '')); })
@@ -36,44 +45,89 @@ function getNumbers(text) {
     });
 }
 
+function splitCells(rowHtml) {
+  const cells = [];
+  String(rowHtml || '').replace(/<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi, function (_, tag, inner) {
+    cells.push(stripTags(inner));
+    return '';
+  });
+  return cells;
+}
+
+function extractTableRows(html) {
+  const rows = [];
+  String(html || '').replace(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi, function (_, inner) {
+    const cells = splitCells(inner);
+    if (cells.length > 0) rows.push(cells);
+    return '';
+  });
+  return rows;
+}
+
+function isGoldContext(text) {
+  return /(黃金|金價|飾金|條塊|金飾|金條|每錢|一錢|錢)/.test(String(text || ''));
+}
+
+function isWrongContext(text) {
+  return /(白金|鉑金|銀價|白銀|美元|盎司|公斤|台幣\/克|每克|買進|入金|回收|賣回)/i.test(String(text || ''));
+}
+
+function pickOutputGoldFromRow(cells) {
+  const normalizedCells = cells.map(function (cell) { return String(cell || '').trim(); });
+  const rowText = normalizedCells.join(' ');
+  if (!/出金/.test(rowText)) return 0;
+  if (!isGoldContext(rowText) || isWrongContext(rowText)) return 0;
+
+  for (let i = 0; i < normalizedCells.length; i += 1) {
+    const cell = normalizedCells[i];
+    if (!/出金/.test(cell)) continue;
+
+    const numbersInSameCell = getMoneyNumbers(cell);
+    if (numbersInSameCell.length > 0) return numbersInSameCell[0];
+
+    for (let j = i + 1; j < normalizedCells.length; j += 1) {
+      const nextCell = normalizedCells[j];
+      if (isWrongContext(nextCell)) continue;
+      const numbers = getMoneyNumbers(nextCell);
+      if (numbers.length > 0) return numbers[0];
+    }
+  }
+
+  const rowNumbers = getMoneyNumbers(rowText);
+  return rowNumbers.length > 0 ? rowNumbers[rowNumbers.length - 1] : 0;
+}
+
 function extractGoldPrice(html) {
+  const rows = extractTableRows(html);
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const value = pickOutputGoldFromRow(rows[i]);
+    if (value > 0) return value;
+  }
+
   const text = htmlToText(html);
   const lines = text
     .split('\n')
     .map(function (line) { return line.trim(); })
     .filter(Boolean);
 
-  const candidates = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!/出金/.test(line)) continue;
+    if (!isGoldContext(line) || isWrongContext(line)) continue;
 
-  lines.forEach(function (line) {
-    const isGoldLine = /(黃金|金價|牌價|每錢|一錢)/.test(line);
-    const isWrongMetal = /(白金|鉑金|銀價|白銀|美元|盎司|公斤|台幣\/克|每克)/i.test(line);
-    if (!isGoldLine || isWrongMetal) return;
+    const sameLineNumbers = getMoneyNumbers(line);
+    if (sameLineNumbers.length > 0) return sameLineNumbers[0];
 
-    getNumbers(line).forEach(function (value) {
-      let score = 1;
-      if (/(一錢|每錢|錢)/.test(line)) score += 4;
-      if (/(黃金|金價|牌價)/.test(line)) score += 2;
-      if (/(賣出|牌告|本會|今日|收盤|參考)/.test(line)) score += 1;
-      if (/(買進|回收|賣回)/.test(line)) score -= 1;
-      candidates.push({ value: value, score: score, line: line });
-    });
-  });
-
-  if (candidates.length === 0) {
-    getNumbers(text).forEach(function (value) {
-      candidates.push({ value: value, score: 0, line: '' });
-    });
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j += 1) {
+      const nextLine = lines[j];
+      if (isWrongContext(nextLine)) continue;
+      const nextNumbers = getMoneyNumbers(nextLine);
+      if (nextNumbers.length > 0) return nextNumbers[0];
+    }
   }
 
-  if (candidates.length === 0) return 0;
-
-  candidates.sort(function (a, b) {
-    if (b.score !== a.score) return b.score - a.score;
-    return b.value - a.value;
-  });
-
-  return candidates[0].value;
+  return 0;
 }
 
 async function readResponseText(response) {
@@ -110,7 +164,7 @@ export default async function handler(req, res) {
     const twdPerMace = extractGoldPrice(html);
 
     if (!Number.isFinite(twdPerMace) || twdPerMace <= 0) {
-      throw new Error('gold price not found');
+      throw new Error('KJGA 出金欄位未找到');
     }
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
@@ -118,6 +172,7 @@ export default async function handler(req, res) {
       success: true,
       price: Math.round(twdPerMace),
       unit: 'TWD_PER_MACE',
+      field: '出金',
       source: 'kjga',
       sourceUrl: GOLD_SOURCE_URL,
       updatedAt: new Date().toISOString()
@@ -126,8 +181,9 @@ export default async function handler(req, res) {
     res.status(200).json({
       success: false,
       price: 0,
-      message: '請手動輸入今日一錢黃金價',
-      source: 'kjga'
+      message: '自動抓取 KJGA 出金欄位失敗，請手動輸入今日一錢黃金出金價',
+      source: 'kjga',
+      field: '出金'
     });
   }
 }
